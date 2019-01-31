@@ -1,9 +1,10 @@
-package spclient
+package client
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -12,9 +13,10 @@ import (
 	"time"
 )
 
-const SharePointServicePrincipal = "00000003-0000-0ff1-ce00-000000000000"
+const sharePointServicePrincipal = "00000003-0000-0ff1-ce00-000000000000"
 
 type SPClient struct {
+	debug         bool
 	clientId      string
 	clientSecret  string
 	siteUrl       string
@@ -48,6 +50,10 @@ func GetRealm(siteUrl string) string {
 		return t[idx+14 : idx+50]
 	}
 	return ""
+}
+
+func (client *SPClient) Dev() {
+	client.debug = true
 }
 
 func (client *SPClient) GetRealm() string {
@@ -133,7 +139,7 @@ func (client *SPClient) GetAddInOnlyAccessToken() *AuthToken {
 		}
 	}
 	sUrl, _ := url.Parse(client.siteUrl)
-	resUrl := GetFormattedPrincipal(SharePointServicePrincipal, sUrl.Hostname(), client.realm)
+	resUrl := GetFormattedPrincipal(sharePointServicePrincipal, sUrl.Hostname(), client.realm)
 	fmtClientId := GetFormattedPrincipal(client.clientId, "", client.realm)
 	authUrl := GetAuthUrl(client.realm)
 	v := url.Values{}
@@ -151,36 +157,41 @@ func (client *SPClient) GetAddInOnlyAccessToken() *AuthToken {
 	return client.token
 }
 
-func (client *SPClient) Get(destUrl string) []byte {
-	token := client.GetAddInOnlyAccessToken()
-	req, _ := http.NewRequest("GET", destUrl, nil)
-	req.Header.Add("Authorization", "Bearer "+token.AccessToken)
-	req.Header.Add("accept", "application/json")
-	req.Header.Add("content-type", "application/json;odata=verbose;charset=utf-8")
-	resp, err := client.httpClient.Do(req)
+func (client *SPClient) prepareRequest(method, link string, body io.Reader) (*http.Request, error) {
+	r, err := http.NewRequest(method, link, body)
 	if err == nil {
-		arr, e := ioutil.ReadAll(resp.Body)
-		if e == nil {
-			return arr
-		}
+		token := client.GetAddInOnlyAccessToken()
+		r.Header.Add("Authorization", "Bearer "+token.AccessToken)
+		r.Header.Add("accept", "application/json")
+		r.Header.Add("content-type", "application/json;odata=verbose;charset=utf-8")
+		return r, nil
 	}
-	return nil
+	return nil, err
 }
 
-func (client *SPClient) Delete(destUrl string) []byte {
-	token := client.GetAddInOnlyAccessToken()
-	req, _ := http.NewRequest("DELETE", destUrl, nil)
-	req.Header.Add("Authorization", "Bearer "+token.AccessToken)
-	req.Header.Add("accept", "application/json")
-	req.Header.Add("content-type", "application/json;odata=verbose;charset=utf-8")
+func (client *SPClient) Get(destUrl string) ([]byte, error) {
+	req, err := client.prepareRequest("GET", destUrl, nil)
 	resp, err := client.httpClient.Do(req)
 	if err == nil {
 		arr, e := ioutil.ReadAll(resp.Body)
 		if e == nil {
-			return arr
+			return arr, nil
 		}
 	}
-	return nil
+	return nil, nil
+}
+
+func (client *SPClient) Delete(destUrl string) ([]byte, error) {
+	req, err := client.prepareRequest("DELETE", destUrl, nil)
+	resp, err := client.httpClient.Do(req)
+	if err == nil {
+		arr, e := ioutil.ReadAll(resp.Body)
+		if e == nil {
+			return arr, nil
+		}
+		return nil, e
+	}
+	return nil, err
 }
 
 func (client *SPClient) PostJson(destUrl string, body []byte) []byte {
@@ -218,9 +229,9 @@ type AuthToken struct {
 	AccessToken string `json:"access_token"`
 }
 
-func GetAddInOnlyAccessToken(siteUrl, realm, clientId, clientSecret string) AuthToken {
+func getAddInOnlyAccessToken(siteUrl, realm, clientId, clientSecret string) AuthToken {
 	sUrl, _ := url.Parse(siteUrl)
-	resUrl := GetFormattedPrincipal(SharePointServicePrincipal, sUrl.Hostname(), realm)
+	resUrl := GetFormattedPrincipal(sharePointServicePrincipal, sUrl.Hostname(), realm)
 	fmtClientId := GetFormattedPrincipal(clientId, "", realm)
 	authUrl := GetAuthUrl(realm)
 	v := url.Values{}
@@ -238,33 +249,33 @@ func GetAddInOnlyAccessToken(siteUrl, realm, clientId, clientSecret string) Auth
 	return token
 }
 
-func main() {
-	fmt.Println("Good one")
-	clientId := "9e2bc1cd-7a31-4cdb-8c6e-8a05a4adcfcc"
-	clientSecret := "ohZCPSXpGHmrGM8xN0G3y5+xOPWkbw1HasxriVkUwBM="
-	u := "https://jlrglobal.sharepoint.com/sites/jlrway"
-	uu, _ := url.Parse(u)
+// func main() {
+// 	fmt.Println("Good one")
+// 	clientId := "9e2bc1cd-7a31-4cdb-8c6e-8a05a4adcfcc"
+// 	clientSecret := "ohZCPSXpGHmrGM8xN0G3y5+xOPWkbw1HasxriVkUwBM="
+// 	u := "https://jlrglobal.sharepoint.com/sites/jlrway"
+// 	uu, _ := url.Parse(u)
 
-	realm := GetRealm(u)
-	prin := GetFormattedPrincipal(SharePointServicePrincipal, uu.Hostname(), realm)
+// 	realm := GetRealm(u)
+// 	prin := GetFormattedPrincipal(SharePointServicePrincipal, uu.Hostname(), realm)
 
-	fmt.Println(realm)
-	fmt.Println(prin)
-	fmt.Println(GetAuthUrl(realm))
-	token := GetAddInOnlyAccessToken(u, realm, clientId, clientSecret)
-	fmt.Println(token.AccessToken)
+// 	fmt.Println(realm)
+// 	fmt.Println(prin)
+// 	fmt.Println(GetAuthUrl(realm))
+// 	token := GetAddInOnlyAccessToken(u, realm, clientId, clientSecret)
+// 	fmt.Println(token.AccessToken)
 
-	rr, _ := http.NewRequest("GET", "https://jlrglobal.sharepoint.com/sites/jlrway/en-gb/_api/web/lists/getByTitle('JLR Emails')", nil)
-	rr.Header.Add("Authorization", "Bearer "+token.AccessToken)
-	rr.Header.Add("accept", "application/json")
-	rr.Header.Add("content-type", "application/json;odata=verbose;charset=utf-8")
-	client := http.Client{}
-	resp, err := client.Do(rr)
-	if err == nil {
-		arr, _ := ioutil.ReadAll(resp.Body)
-		fmt.Println(string(arr))
-	} else {
-		fmt.Println(err)
-	}
+// 	rr, _ := http.NewRequest("GET", "https://jlrglobal.sharepoint.com/sites/jlrway/en-gb/_api/web/lists/getByTitle('JLR Emails')", nil)
+// 	rr.Header.Add("Authorization", "Bearer "+token.AccessToken)
+// 	rr.Header.Add("accept", "application/json")
+// 	rr.Header.Add("content-type", "application/json;odata=verbose;charset=utf-8")
+// 	client := http.Client{}
+// 	resp, err := client.Do(rr)
+// 	if err == nil {
+// 		arr, _ := ioutil.ReadAll(resp.Body)
+// 		fmt.Println(string(arr))
+// 	} else {
+// 		fmt.Println(err)
+// 	}
 
-}
+// }
